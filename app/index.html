@@ -27,7 +27,6 @@
 
         video.srcObject = stream;
 
-        // когда видео готово — начинаем захват кадров
         video.onloadedmetadata = () => {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -37,13 +36,28 @@
       }
 
       function captureFrames() {
-        setInterval(() => {
+        setInterval(async () => {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
           const frame = canvas.toDataURL("image/jpeg", 0.5);
 
-          console.log("Frame captured", frame.substring(0, 50));
-        }, 100); // ~10 FPS
+          try {
+            const response = await fetch("http://127.0.0.1:5000/detect", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ frame })
+            });
+
+            const result = await response.json();
+            console.log("Detection result:", result);
+
+          } catch (err) {
+            console.error("Ошибка отправки:", err);
+          }
+
+        }, 300); 
       }
 
       startCapture();
