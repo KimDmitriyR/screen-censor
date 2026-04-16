@@ -2,14 +2,17 @@
 <html>
   <body>
     <h2>Screen Capture</h2>
+
     <video id="video" autoplay playsinline style="width:100%;"></video>
+    <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
       const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
 
       async function startCapture() {
         const sources = await window.electronAPI.getSources();
-
         const source = sources[0];
 
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -23,7 +26,24 @@
         });
 
         video.srcObject = stream;
-        console.log(window.electronAPI);
+
+        // когда видео готово — начинаем захват кадров
+        video.onloadedmetadata = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+
+          captureFrames();
+        };
+      }
+
+      function captureFrames() {
+        setInterval(() => {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          const frame = canvas.toDataURL("image/jpeg", 0.5);
+
+          console.log("Frame captured", frame.substring(0, 50));
+        }, 100); // ~10 FPS
       }
 
       startCapture();
