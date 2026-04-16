@@ -1,6 +1,32 @@
 <!DOCTYPE html>
 <html>
   <body>
-    <h1>Screen Censor</h1>
+    <h2>Screen Capture</h2>
+    <video id="video" autoplay playsinline style="width:100%;"></video>
+
+    <script>
+      const video = document.getElementById("video");
+
+      async function startCapture() {
+        const sources = await window.electronAPI.getSources();
+
+        const source = sources[0];
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: source.id
+            }
+          }
+        });
+
+        video.srcObject = stream;
+        console.log(window.electronAPI);
+      }
+
+      startCapture();
+    </script>
   </body>
 </html>
