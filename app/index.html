@@ -1,9 +1,20 @@
 <!DOCTYPE html>
 <html>
-  <body>
+  <body style="margin:0; overflow:hidden;">
     <h2>Screen Capture</h2>
 
-    <video id="video" autoplay playsinline style="width:100%;"></video>
+    <div id="container" style="position:relative; width:100vw; height:100vh;">
+
+      <video id="video" autoplay playsinline
+        style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; object-position: top;">
+      </video>
+
+      <canvas id="overlay"
+        style="position:absolute; top:0; left:0; width:100%; height:100%;">
+      </canvas>
+
+    </div>
+
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
@@ -11,10 +22,13 @@
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
 
+      const overlay = document.getElementById("overlay");
+      const overlayCtx = overlay.getContext("2d");
+
       async function startCapture() {
         const sources = await window.electronAPI.getSources();
         const source = sources[0];
-
+        
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
@@ -24,12 +38,18 @@
             }
           }
         });
-
+        
         video.srcObject = stream;
 
         video.onloadedmetadata = () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+          const width = video.videoWidth;
+          const height = video.videoHeight;
+
+          canvas.width = width;
+          canvas.height = height;
+
+          overlay.width = width;
+          overlay.height = height;
 
           captureFrames();
         };
@@ -51,13 +71,33 @@
             });
 
             const result = await response.json();
-            console.log("Detection result:", result);
+
+            drawBoxes(result.boxes);
 
           } catch (err) {
-            console.error("Ошибка отправки:", err);
+            console.error("Ошибка:", err);
           }
 
-        }, 300); 
+        }, 300);
+      }
+
+      function drawBoxes(boxes) {
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+        const scaleX = overlay.clientWidth / overlay.width;
+        const scaleY = overlay.clientHeight / overlay.height;
+
+        overlayCtx.strokeStyle = "red";
+        overlayCtx.lineWidth = 3;
+
+        boxes.forEach(box => {
+          overlayCtx.strokeRect(
+            box.x * scaleX,
+            box.y * scaleY,
+            box.w * scaleX,
+            box.h * scaleY
+          );
+        });
       }
 
       startCapture();
