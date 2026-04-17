@@ -1,21 +1,20 @@
 <!DOCTYPE html>
 <html>
   <body style="margin:0; overflow:hidden; background: transparent;">
-    <h2>Screen Capture</h2>
-
     <div id="container" style="position:relative; width:100vw; height:100vh;">
 
-      <video id="video" autoplay playsinline
-        style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; object-position: top;">
-      </video>
+      <!-- СКРЫТЫЙ video (только источник) -->
+      <video id="video" autoplay playsinline style="display:none;"></video>
+
+      <canvas id="canvas"
+        style="position:absolute; top:0; left:0;">
+      </canvas>
 
       <canvas id="overlay"
-        style="position:absolute; top:0; left:0; width:100%; height:100%;">
+        style="position:absolute; top:0; left:0;">
       </canvas>
 
     </div>
-
-    <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
       const video = document.getElementById("video");
@@ -28,64 +27,88 @@
       async function startCapture() {
         const sources = await window.electronAPI.getSources();
         const source = sources[0];
-        
+
+        console.log(sources.map(s => s.name));
+
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
             mandatory: {
               chromeMediaSource: 'desktop',
-              chromeMediaSourceId: source.id
+              chromeMediaSourceId: source.id,
+              maxWidth: 1920,
+              maxHeight: 1080
             }
           }
         });
-        
+
         video.srcObject = stream;
 
         video.onloadedmetadata = () => {
           const width = video.videoWidth;
           const height = video.videoHeight;
 
+          // 👉 правильный размер рендера
           canvas.width = width;
           canvas.height = height;
 
           overlay.width = width;
           overlay.height = height;
 
+          // 👉 визуально растягиваем под экран
+          canvas.style.width = "100vw";
+          canvas.style.height = "100vh";
+
+          overlay.style.width = "100vw";
+          overlay.style.height = "100vh";
+
+          console.log("FINAL SIZE:", width, height);
+
           captureFrames();
         };
       }
+      let isProcessing = false;
 
       function captureFrames() {
         setInterval(async () => {
+
+          // всегда рисуем экран (плавно)
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-          const frame = canvas.toDataURL("image/jpeg", 0.5);
+          if (isProcessing) return;
+
+          isProcessing = true;
+
+          const blob = await new Promise(resolve =>
+            canvas.toBlob(resolve, "image/jpeg", 0.9)
+          );
+
+          const formData = new FormData();
+          formData.append("frame", blob);
 
           try {
             const response = await fetch("http://127.0.0.1:5000/detect", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({ frame })
+              body: formData
             });
 
             const result = await response.json();
-
             drawBoxes(result.boxes);
 
           } catch (err) {
-            console.error("Ошибка:", err);
+            console.error(err);
           }
 
-        }, 300);
+          isProcessing = false;
+
+        }, 30); // быстрый UI
       }
 
       function drawBoxes(boxes) {
         overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
-        const scaleX = overlay.clientWidth / overlay.width;
-        const scaleY = overlay.clientHeight / overlay.height;
+        const scaleX = canvas.clientWidth / canvas.width;
+        const scaleY = canvas.clientHeight / canvas.height;
 
         boxes.forEach(box => {
           const x = box.x * scaleX;
@@ -93,7 +116,13 @@
           const w = box.w * scaleX;
           const h = box.h * scaleY;
 
+          // 👉 ЦЕНЗУРА
           blurArea(x, y, w, h);
+
+          // 👉 (временно можно оставить рамку для дебага)
+          overlayCtx.strokeStyle = "red";
+          overlayCtx.lineWidth = 2;
+          overlayCtx.strokeRect(x, y, w, h);
         });
       }
 
@@ -101,37 +130,16 @@
         overlayCtx.filter = "blur(15px)";
 
         overlayCtx.drawImage(
-          canvas,
-          x, y, w, h,   
-          x, y, w, h   
+          canvas, // берём из canvas (чистый экран)
+          x, y, w, h,
+          x, y, w, h
         );
 
         overlayCtx.filter = "none";
-      }
-
-      function pixelate(x, y, w, h) {
-        const size = 1.5; 
-       
-        const imageData = ctx.getImageData(x, y, w, h);
-        
-        const tempCanvas = document.createElement("canvas");
-        const tempCtx = tempCanvas.getContext("2d");
-
-        tempCanvas.width = w / size;
-        tempCanvas.height = h / size;
-
-        tempCtx.putImageData(imageData, 0, 0);
-        tempCtx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height);
-
-        overlayCtx.imageSmoothingEnabled = false;
-        overlayCtx.drawImage(
-          tempCanvas,
-          0, 0, tempCanvas.width, tempCanvas.height,
-          x, y, w, h
-        );
       }
 
       startCapture();
     </script>
   </body>
 </html>
+```

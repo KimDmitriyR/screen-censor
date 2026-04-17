@@ -18,7 +18,7 @@ function createWindow() {
 
   win.loadFile('index.html');
 
-
+  win.setContentProtection(true);
   win.setIgnoreMouseEvents(true);
 }
 
