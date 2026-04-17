@@ -1,10 +1,14 @@
 const { app, BrowserWindow, session, ipcMain, desktopCapturer } = require('electron');
 const path = require('path');
 
+let win;
+
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 800,
-    height: 600,
+  win = new BrowserWindow({
+    fullscreen: true,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -13,6 +17,9 @@ function createWindow() {
   });
 
   win.loadFile('index.html');
+
+
+  win.setIgnoreMouseEvents(true);
 }
 
 app.whenReady().then(() => {

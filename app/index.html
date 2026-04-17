@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-  <body style="margin:0; overflow:hidden;">
+  <body style="margin:0; overflow:hidden; background: transparent;">
     <h2>Screen Capture</h2>
 
     <div id="container" style="position:relative; width:100vw; height:100vh;">
@@ -87,17 +87,48 @@
         const scaleX = overlay.clientWidth / overlay.width;
         const scaleY = overlay.clientHeight / overlay.height;
 
-        overlayCtx.strokeStyle = "red";
-        overlayCtx.lineWidth = 3;
-
         boxes.forEach(box => {
-          overlayCtx.strokeRect(
-            box.x * scaleX,
-            box.y * scaleY,
-            box.w * scaleX,
-            box.h * scaleY
-          );
+          const x = box.x * scaleX;
+          const y = box.y * scaleY;
+          const w = box.w * scaleX;
+          const h = box.h * scaleY;
+
+          blurArea(x, y, w, h);
         });
+      }
+
+      function blurArea(x, y, w, h) {
+        overlayCtx.filter = "blur(15px)";
+
+        overlayCtx.drawImage(
+          canvas,
+          x, y, w, h,   
+          x, y, w, h   
+        );
+
+        overlayCtx.filter = "none";
+      }
+
+      function pixelate(x, y, w, h) {
+        const size = 1.5; 
+       
+        const imageData = ctx.getImageData(x, y, w, h);
+        
+        const tempCanvas = document.createElement("canvas");
+        const tempCtx = tempCanvas.getContext("2d");
+
+        tempCanvas.width = w / size;
+        tempCanvas.height = h / size;
+
+        tempCtx.putImageData(imageData, 0, 0);
+        tempCtx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height);
+
+        overlayCtx.imageSmoothingEnabled = false;
+        overlayCtx.drawImage(
+          tempCanvas,
+          0, 0, tempCanvas.width, tempCanvas.height,
+          x, y, w, h
+        );
       }
 
       startCapture();
