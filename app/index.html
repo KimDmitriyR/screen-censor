@@ -2,18 +2,23 @@
 <html>
   <body style="margin:0; overflow:hidden; background: transparent;">
     <div id="container" style="position:relative; width:100vw; height:100vh;">
-
-      <!-- СКРЫТЫЙ video (только источник) -->
       <video id="video" autoplay playsinline style="display:none;"></video>
 
       <canvas id="canvas"
-        style="position:absolute; top:0; left:0;">
+        style="position:absolute; top:0; left:0; width:100%; height:100%;">
       </canvas>
 
       <canvas id="overlay"
-        style="position:absolute; top:0; left:0;">
+        style="position:absolute; top:0; left:0; width:100%; height:100%;">
       </canvas>
+    </div>
 
+    <div style="position:fixed; top:10px; left:10px; background:black; color:white; padding:10px; z-index:999; font-family:sans-serif;">
+      <label><input type="checkbox" id="face" checked> Face</label><br>
+      <label><input type="checkbox" id="torso" checked> Torso</label><br>
+      <label><input type="checkbox" id="arms" checked> Arms</label><br>
+      <label><input type="checkbox" id="legs" checked> Legs</label><br>
+      <label><input type="checkbox" id="silhouette" checked> Silhouette</label>
     </div>
 
     <script>
@@ -24,17 +29,31 @@
       const overlay = document.getElementById("overlay");
       const overlayCtx = overlay.getContext("2d");
 
+      const smallCanvas = document.createElement("canvas");
+      const smallCtx = smallCanvas.getContext("2d");
+
+      const pixelCanvas = document.createElement("canvas");
+      const pixelCtx = pixelCanvas.getContext("2d");
+
+      let isProcessing = false;
+      let latestResult = { boxes: [], polygons: [] };
+      let smoothedResult = { boxes: [], polygons: [] };
+      let frameCounter = 0;
+      const INFER_EVERY_N_FRAMES = 4;
+
+      const SMOOTH_ALPHA = 0.35;
+      const HOLD_FRAMES = 6;
+      let framesSinceLastDetection = 0;
+
       async function startCapture() {
         const sources = await window.electronAPI.getSources();
         const source = sources[0];
-
-        console.log(sources.map(s => s.name));
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
             mandatory: {
-              chromeMediaSource: 'desktop',
+              chromeMediaSource: "desktop",
               chromeMediaSourceId: source.id,
               maxWidth: 1920,
               maxHeight: 1080
@@ -48,98 +67,200 @@
           const width = video.videoWidth;
           const height = video.videoHeight;
 
-          // 👉 правильный размер рендера
           canvas.width = width;
           canvas.height = height;
-
           overlay.width = width;
           overlay.height = height;
 
-          // 👉 визуально растягиваем под экран
           canvas.style.width = "100vw";
           canvas.style.height = "100vh";
-
           overlay.style.width = "100vw";
           overlay.style.height = "100vh";
 
-          console.log("FINAL SIZE:", width, height);
-
-          captureFrames();
+          requestAnimationFrame(tick);
         };
       }
-      let isProcessing = false;
 
-      function captureFrames() {
-        setInterval(async () => {
+      function currentSettings() {
+        return {
+          face: document.getElementById("face").checked,
+          torso: document.getElementById("torso").checked,
+          arms: document.getElementById("arms").checked,
+          legs: document.getElementById("legs").checked,
+          silhouette: document.getElementById("silhouette").checked
+        };
+      }
 
-          // всегда рисуем экран (плавно)
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      async function sendFrame() {
+        if (isProcessing) return;
+        isProcessing = true;
 
-          if (isProcessing) return;
-
-          isProcessing = true;
-
+        try {
           const blob = await new Promise(resolve =>
-            canvas.toBlob(resolve, "image/jpeg", 0.9)
+            canvas.toBlob(resolve, "image/jpeg", 0.85)
           );
 
           const formData = new FormData();
           formData.append("frame", blob);
+          formData.append("settings", JSON.stringify(currentSettings()));
 
-          try {
-            const response = await fetch("http://127.0.0.1:5000/detect", {
-              method: "POST",
-              body: formData
+          const response = await fetch("http://127.0.0.1:5000/detect", {
+            method: "POST",
+            body: formData
+          });
+
+          const result = await response.json();
+          latestResult = result || { boxes: [], polygons: [] };
+          framesSinceLastDetection = 0;
+        } catch (err) {
+          console.error(err);
+        } finally {
+          isProcessing = false;
+        }
+      }
+
+      function smoothBoxes(prev, next, alpha) {
+        const out = [];
+        const count = Math.min(prev.length, next.length);
+
+        for (let i = 0; i < count; i++) {
+          const a = prev[i];
+          const b = next[i];
+          out.push({
+            ...b,
+            x: a.x * (1 - alpha) + b.x * alpha,
+            y: a.y * (1 - alpha) + b.y * alpha,
+            w: a.w * (1 - alpha) + b.w * alpha,
+            h: a.h * (1 - alpha) + b.h * alpha
+          });
+        }
+
+        for (let i = count; i < next.length; i++) {
+          out.push(next[i]);
+        }
+
+        return out;
+      }
+
+      function smoothPolygons(prev, next, alpha) {
+        const out = [];
+        const count = Math.min(prev.length, next.length);
+
+        for (let i = 0; i < count; i++) {
+          const pa = prev[i];
+          const pb = next[i];
+          const len = Math.min(pa.points.length, pb.points.length);
+
+          const points = [];
+          for (let j = 0; j < len; j++) {
+            points.push({
+              x: pa.points[j].x * (1 - alpha) + pb.points[j].x * alpha,
+              y: pa.points[j].y * (1 - alpha) + pb.points[j].y * alpha
             });
-
-            const result = await response.json();
-            drawBoxes(result.boxes);
-
-          } catch (err) {
-            console.error(err);
           }
 
-          isProcessing = false;
+          out.push({
+            ...pb,
+            points
+          });
+        }
 
-        }, 30); // быстрый UI
+        for (let i = count; i < next.length; i++) {
+          out.push(next[i]);
+        }
+
+        return out;
       }
 
-      function drawBoxes(boxes) {
+      function tick() {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        if (frameCounter % INFER_EVERY_N_FRAMES === 0) {
+          sendFrame();
+        }
+
+        // Если детекция временно пропала, держим последний результат несколько кадров
+        if ((latestResult.boxes?.length || latestResult.polygons?.length) > 0) {
+          smoothedResult = {
+            boxes: smoothBoxes(smoothedResult.boxes || [], latestResult.boxes || [], SMOOTH_ALPHA),
+            polygons: smoothPolygons(smoothedResult.polygons || [], latestResult.polygons || [], SMOOTH_ALPHA)
+          };
+        } else {
+          framesSinceLastDetection++;
+          if (framesSinceLastDetection > HOLD_FRAMES) {
+            smoothedResult = { boxes: [], polygons: [] };
+          }
+        }
+
+        drawCensor(smoothedResult);
+        frameCounter++;
+        requestAnimationFrame(tick);
+      }
+
+      function buildPixelatedFrame() {
+        const scale = 0.08;
+        const smallW = Math.max(1, Math.floor(canvas.width * scale));
+        const smallH = Math.max(1, Math.floor(canvas.height * scale));
+
+        smallCanvas.width = smallW;
+        smallCanvas.height = smallH;
+
+        pixelCanvas.width = canvas.width;
+        pixelCanvas.height = canvas.height;
+
+        smallCtx.drawImage(canvas, 0, 0, smallW, smallH);
+
+        pixelCtx.imageSmoothingEnabled = false;
+        pixelCtx.clearRect(0, 0, pixelCanvas.width, pixelCanvas.height);
+        pixelCtx.drawImage(
+          smallCanvas,
+          0, 0, smallW, smallH,
+          0, 0, pixelCanvas.width, pixelCanvas.height
+        );
+      }
+
+      function drawCensor(result) {
         overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
-        const scaleX = canvas.clientWidth / canvas.width;
-        const scaleY = canvas.clientHeight / canvas.height;
+        const enabled = currentSettings();
+        const boxes = (result && result.boxes) ? result.boxes : [];
+        const polygons = (result && result.polygons) ? result.polygons : [];
 
-        boxes.forEach(box => {
-          const x = box.x * scaleX;
-          const y = box.y * scaleY;
-          const w = box.w * scaleX;
-          const h = box.h * scaleY;
+        if (boxes.length === 0 && polygons.length === 0) {
+          return;
+        }
 
-          // 👉 ЦЕНЗУРА
-          blurArea(x, y, w, h);
+        buildPixelatedFrame();
 
-          // 👉 (временно можно оставить рамку для дебага)
-          overlayCtx.strokeStyle = "red";
-          overlayCtx.lineWidth = 2;
-          overlayCtx.strokeRect(x, y, w, h);
+        boxes.forEach(item => {
+          if (!enabled[item.part]) return;
+
+          overlayCtx.save();
+          overlayCtx.beginPath();
+          overlayCtx.rect(item.x, item.y, item.w, item.h);
+          overlayCtx.clip();
+          overlayCtx.drawImage(pixelCanvas, 0, 0);
+          overlayCtx.restore();
         });
-      }
 
-      function blurArea(x, y, w, h) {
-        overlayCtx.filter = "blur(15px)";
+        polygons.forEach(item => {
+          if (!enabled[item.part]) return;
+          if (!item.points || item.points.length < 3) return;
 
-        overlayCtx.drawImage(
-          canvas, // берём из canvas (чистый экран)
-          x, y, w, h,
-          x, y, w, h
-        );
-
-        overlayCtx.filter = "none";
+          overlayCtx.save();
+          overlayCtx.beginPath();
+          overlayCtx.moveTo(item.points[0].x, item.points[0].y);
+          for (let i = 1; i < item.points.length; i++) {
+            overlayCtx.lineTo(item.points[i].x, item.points[i].y);
+          }
+          overlayCtx.closePath();
+          overlayCtx.clip();
+          overlayCtx.drawImage(pixelCanvas, 0, 0);
+          overlayCtx.restore();
+        });
       }
 
       startCapture();
     </script>
   </body>
 </html>
-```
