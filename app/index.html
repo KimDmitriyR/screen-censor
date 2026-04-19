@@ -13,15 +13,64 @@
       </canvas>
     </div>
 
-    <div style="position:fixed; top:10px; left:10px; background:black; color:white; padding:10px; z-index:999; font-family:sans-serif;">
-      <label><input type="checkbox" id="face" checked> Face</label><br>
-      <label><input type="checkbox" id="torso" checked> Torso</label><br>
-      <label><input type="checkbox" id="arms" checked> Arms</label><br>
-      <label><input type="checkbox" id="legs" checked> Legs</label><br>
-      <label><input type="checkbox" id="silhouette" checked> Silhouette</label>
+    <div id="panel"
+         style="position:fixed; top:10px; left:10px; width:320px; max-height:calc(100vh - 20px); overflow:auto; background:rgba(0,0,0,0.88); color:white; padding:12px; z-index:999; font-family:sans-serif; border-radius:12px; backdrop-filter: blur(8px); box-shadow:0 8px 24px rgba(0,0,0,0.35);">
+      <div style="font-weight:700; font-size:16px; margin-bottom:10px;">Панель цензуры</div>
+      <div id="controls"></div>
     </div>
 
     <script>
+      const PARTS = [
+        { id: "face", label: "Лицо", checked: true, group: "Голова" },
+        { id: "eyes", label: "Глаза", checked: true, group: "Голова" },
+
+        { id: "shoulders", label: "Плечи", checked: false, group: "Верх тела" },
+        { id: "torso", label: "Туловище", checked: true, group: "Верх тела" },
+        { id: "chest", label: "Грудь", checked: false, group: "Верх тела" },
+        { id: "back", label: "Спина", checked: false, group: "Верх тела" },
+        { id: "armpits", label: "Подмышки", checked: false, group: "Верх тела" },
+        { id: "navel", label: "Пупок", checked: false, group: "Верх тела" },
+        { id: "hips", label: "Бёдра / таз", checked: false, group: "Верх тела" },
+
+        { id: "hands", label: "Кисти", checked: true, group: "Руки" },
+        { id: "wrists", label: "Запястья", checked: false, group: "Руки" },
+        { id: "forearms", label: "Предплечья", checked: false, group: "Руки" },
+
+        { id: "buttocks", label: "Ягодицы", checked: false, group: "Низ тела" },
+        { id: "thighs", label: "Бёдра", checked: false, group: "Низ тела" },
+        { id: "knees", label: "Колени", checked: false, group: "Низ тела" },
+        { id: "calves", label: "Икры", checked: false, group: "Низ тела" },
+        { id: "feet", label: "Ступни", checked: false, group: "Низ тела" },
+
+        { id: "intimate_front", label: "Чувствительная зона спереди", checked: false, group: "Чувствительные зоны" },
+        { id: "intimate_back", label: "Чувствительная зона сзади", checked: false, group: "Чувствительные зоны" },
+
+        { id: "silhouette", label: "Силуэт целиком", checked: true, group: "Продвинутое" }
+      ];
+
+      const PART_BEHAVIOR = {
+        face: { smooth: 0.65, predict: 0.00 },
+        eyes: { smooth: 0.75, predict: 0.00 },
+        shoulders: { smooth: 0.45, predict: 0.03 },
+        torso: { smooth: 0.40, predict: 0.08 },
+        chest: { smooth: 0.38, predict: 0.06 },
+        back: { smooth: 0.38, predict: 0.06 },
+        armpits: { smooth: 0.40, predict: 0.05 },
+        navel: { smooth: 0.42, predict: 0.04 },
+        hips: { smooth: 0.42, predict: 0.04 },
+        buttocks: { smooth: 0.42, predict: 0.04 },
+        hands: { smooth: 0.48, predict: 0.12 },
+        wrists: { smooth: 0.55, predict: 0.00 },
+        forearms: { smooth: 0.45, predict: 0.10 },
+        thighs: { smooth: 0.48, predict: 0.10 },
+        knees: { smooth: 0.55, predict: 0.02 },
+        calves: { smooth: 0.45, predict: 0.08 },
+        feet: { smooth: 0.55, predict: 0.02 },
+        intimate_front: { smooth: 0.45, predict: 0.00 },
+        intimate_back: { smooth: 0.45, predict: 0.00 },
+        silhouette: { smooth: 0.35, predict: 0.05 }
+      };
+
       const video = document.getElementById("video");
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
@@ -35,15 +84,75 @@
       const pixelCanvas = document.createElement("canvas");
       const pixelCtx = pixelCanvas.getContext("2d");
 
-      let isProcessing = false;
-      let latestResult = { boxes: [], polygons: [] };
-      let smoothedResult = { boxes: [], polygons: [] };
+      let latestPolygons = [];
+      let trackedPolygons = new Map();
+      let isInferenceRunning = false;
       let frameCounter = 0;
-      const INFER_EVERY_N_FRAMES = 4;
+      let lastInferenceAt = 0;
 
-      const SMOOTH_ALPHA = 0.35;
-      const HOLD_FRAMES = 6;
-      let framesSinceLastDetection = 0;
+      const INFER_EVERY_N_FRAMES = 4;
+      const INFER_TARGET_MS = 90;
+      const STALE_MS = 450;
+      const DEFAULT_HOLD_FRAMES = 6;
+
+      function renderControls() {
+        const groups = {};
+        for (const p of PARTS) {
+          if (!groups[p.group]) groups[p.group] = [];
+          groups[p.group].push(p);
+        }
+
+        const controls = document.getElementById("controls");
+        controls.innerHTML = "";
+
+        for (const [group, items] of Object.entries(groups)) {
+          const wrap = document.createElement("div");
+          wrap.style.marginBottom = "10px";
+
+          const title = document.createElement("div");
+          title.textContent = group;
+          title.style.fontWeight = "700";
+          title.style.margin = "8px 0 6px";
+          wrap.appendChild(title);
+
+          for (const item of items) {
+            const row = document.createElement("label");
+            row.style.display = "block";
+            row.style.margin = "4px 0";
+            row.style.cursor = "pointer";
+
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.id = item.id;
+            cb.checked = item.checked;
+            cb.style.marginRight = "8px";
+
+            row.appendChild(cb);
+            row.appendChild(document.createTextNode(item.label));
+            wrap.appendChild(row);
+          }
+
+          controls.appendChild(wrap);
+        }
+      }
+
+      renderControls();
+
+      function currentSettings() {
+        const s = {};
+        for (const p of PARTS) {
+          s[p.id] = document.getElementById(p.id).checked;
+        }
+        return s;
+      }
+
+      function anyEnabled(settings) {
+        return Object.values(settings).some(Boolean);
+      }
+
+      function behaviorFor(part) {
+        return PART_BEHAVIOR[part] || { smooth: 0.4, predict: 0.05 };
+      }
 
       async function startCapture() {
         const sources = await window.electronAPI.getSources();
@@ -77,23 +186,44 @@
           overlay.style.width = "100vw";
           overlay.style.height = "100vh";
 
-          requestAnimationFrame(tick);
+          requestAnimationFrame(renderLoop);
+          scheduleInference();
         };
       }
 
-      function currentSettings() {
-        return {
-          face: document.getElementById("face").checked,
-          torso: document.getElementById("torso").checked,
-          arms: document.getElementById("arms").checked,
-          legs: document.getElementById("legs").checked,
-          silhouette: document.getElementById("silhouette").checked
-        };
+      function renderLoop() {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const elapsed = performance.now() - lastInferenceAt;
+        if (lastInferenceAt === 0 || elapsed <= STALE_MS) {
+          const stablePolygons = getPredictedPolygons();
+          drawCensor(stablePolygons);
+        } else {
+          overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+          trackedPolygons.clear();
+        }
+
+        requestAnimationFrame(renderLoop);
       }
 
-      async function sendFrame() {
-        if (isProcessing) return;
-        isProcessing = true;
+      async function scheduleInference() {
+        const settings = currentSettings();
+
+        if (!anyEnabled(settings)) {
+          latestPolygons = [];
+          trackedPolygons.clear();
+          overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+          setTimeout(scheduleInference, 250);
+          return;
+        }
+
+        if (isInferenceRunning) {
+          setTimeout(scheduleInference, 20);
+          return;
+        }
+
+        isInferenceRunning = true;
+        const started = performance.now();
 
         try {
           const blob = await new Promise(resolve =>
@@ -102,7 +232,7 @@
 
           const formData = new FormData();
           formData.append("frame", blob);
-          formData.append("settings", JSON.stringify(currentSettings()));
+          formData.append("settings", JSON.stringify(settings));
 
           const response = await fetch("http://127.0.0.1:5000/detect", {
             method: "POST",
@@ -110,91 +240,120 @@
           });
 
           const result = await response.json();
-          latestResult = result || { boxes: [], polygons: [] };
-          framesSinceLastDetection = 0;
+          latestPolygons = result.polygons || [];
+          lastInferenceAt = performance.now();
+          updateTracks(latestPolygons);
         } catch (err) {
           console.error(err);
         } finally {
-          isProcessing = false;
+          isInferenceRunning = false;
+          const elapsed = performance.now() - started;
+          const wait = Math.max(0, INFER_TARGET_MS - elapsed);
+          setTimeout(scheduleInference, wait);
         }
       }
 
-      function smoothBoxes(prev, next, alpha) {
-        const out = [];
-        const count = Math.min(prev.length, next.length);
+      function smoothPolygon(prevPoints, nextPoints, alpha) {
+        if (!prevPoints || !nextPoints || prevPoints.length !== nextPoints.length) {
+          return nextPoints;
+        }
 
-        for (let i = 0; i < count; i++) {
-          const a = prev[i];
-          const b = next[i];
+        const out = [];
+        for (let i = 0; i < nextPoints.length; i++) {
           out.push({
-            ...b,
-            x: a.x * (1 - alpha) + b.x * alpha,
-            y: a.y * (1 - alpha) + b.y * alpha,
-            w: a.w * (1 - alpha) + b.w * alpha,
-            h: a.h * (1 - alpha) + b.h * alpha
+            x: prevPoints[i].x * (1 - alpha) + nextPoints[i].x * alpha,
+            y: prevPoints[i].y * (1 - alpha) + nextPoints[i].y * alpha
           });
         }
-
-        for (let i = count; i < next.length; i++) {
-          out.push(next[i]);
-        }
-
         return out;
       }
 
-      function smoothPolygons(prev, next, alpha) {
-        const out = [];
-        const count = Math.min(prev.length, next.length);
+      function predictPolygon(points, velocity, ahead) {
+        if (!points || !velocity || points.length !== velocity.length || ahead <= 0) {
+          return points;
+        }
 
-        for (let i = 0; i < count; i++) {
-          const pa = prev[i];
-          const pb = next[i];
-          const len = Math.min(pa.points.length, pb.points.length);
+        return points.map((p, i) => ({
+          x: p.x + velocity[i].x * ahead,
+          y: p.y + velocity[i].y * ahead
+        }));
+      }
 
-          const points = [];
-          for (let j = 0; j < len; j++) {
-            points.push({
-              x: pa.points[j].x * (1 - alpha) + pb.points[j].x * alpha,
-              y: pa.points[j].y * (1 - alpha) + pb.points[j].y * alpha
+      function updateTracks(rawPolygons) {
+        const seen = new Set();
+
+        for (const poly of rawPolygons) {
+          seen.add(poly.id);
+
+          const prev = trackedPolygons.get(poly.id);
+          const behavior = behaviorFor(poly.part);
+
+          if (!prev) {
+            trackedPolygons.set(poly.id, {
+              id: poly.id,
+              part: poly.part,
+              points: poly.points,
+              velocity: poly.points.map(() => ({ x: 0, y: 0 })),
+              missing: 0
             });
+            continue;
           }
 
-          out.push({
-            ...pb,
-            points
+          const smoothed = smoothPolygon(prev.points, poly.points, behavior.smooth);
+
+          const velocity = [];
+          if (prev.points && smoothed && prev.points.length === smoothed.length) {
+            for (let i = 0; i < smoothed.length; i++) {
+              const vx = (smoothed[i].x - prev.points[i].x);
+              const vy = (smoothed[i].y - prev.points[i].y);
+
+              const oldV = prev.velocity?.[i] || { x: 0, y: 0 };
+
+              velocity.push({
+                x: oldV.x * 0.72 + vx * 0.28,
+                y: oldV.y * 0.72 + vy * 0.28
+              });
+            }
+          } else {
+            for (let i = 0; i < smoothed.length; i++) {
+              velocity.push({ x: 0, y: 0 });
+            }
+          }
+
+          trackedPolygons.set(poly.id, {
+            id: poly.id,
+            part: poly.part,
+            points: smoothed,
+            velocity,
+            missing: 0
           });
         }
 
-        for (let i = count; i < next.length; i++) {
-          out.push(next[i]);
+        for (const [id, value] of trackedPolygons.entries()) {
+          if (!seen.has(id)) {
+            value.missing = (value.missing || 0) + 1;
+            if (value.missing > DEFAULT_HOLD_FRAMES) {
+              trackedPolygons.delete(id);
+            } else {
+              trackedPolygons.set(id, value);
+            }
+          }
+        }
+      }
+
+      function getPredictedPolygons() {
+        const out = [];
+
+        for (const item of trackedPolygons.values()) {
+          const behavior = behaviorFor(item.part);
+          const predicted = predictPolygon(item.points, item.velocity, behavior.predict);
+          out.push({
+            ...item,
+            points: predicted
+          });
         }
 
         return out;
-      }
-
-      function tick() {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        if (frameCounter % INFER_EVERY_N_FRAMES === 0) {
-          sendFrame();
-        }
-
-        // Если детекция временно пропала, держим последний результат несколько кадров
-        if ((latestResult.boxes?.length || latestResult.polygons?.length) > 0) {
-          smoothedResult = {
-            boxes: smoothBoxes(smoothedResult.boxes || [], latestResult.boxes || [], SMOOTH_ALPHA),
-            polygons: smoothPolygons(smoothedResult.polygons || [], latestResult.polygons || [], SMOOTH_ALPHA)
-          };
-        } else {
-          framesSinceLastDetection++;
-          if (framesSinceLastDetection > HOLD_FRAMES) {
-            smoothedResult = { boxes: [], polygons: [] };
-          }
-        }
-
-        drawCensor(smoothedResult);
-        frameCounter++;
-        requestAnimationFrame(tick);
       }
 
       function buildPixelatedFrame() {
@@ -219,33 +378,17 @@
         );
       }
 
-      function drawCensor(result) {
+      function drawCensor(polygons) {
+        const enabled = currentSettings();
         overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
-        const enabled = currentSettings();
-        const boxes = (result && result.boxes) ? result.boxes : [];
-        const polygons = (result && result.polygons) ? result.polygons : [];
-
-        if (boxes.length === 0 && polygons.length === 0) {
-          return;
-        }
+        if (!polygons || polygons.length === 0) return;
 
         buildPixelatedFrame();
 
-        boxes.forEach(item => {
-          if (!enabled[item.part]) return;
-
-          overlayCtx.save();
-          overlayCtx.beginPath();
-          overlayCtx.rect(item.x, item.y, item.w, item.h);
-          overlayCtx.clip();
-          overlayCtx.drawImage(pixelCanvas, 0, 0);
-          overlayCtx.restore();
-        });
-
-        polygons.forEach(item => {
-          if (!enabled[item.part]) return;
-          if (!item.points || item.points.length < 3) return;
+        for (const item of polygons) {
+          if (!enabled[item.part]) continue;
+          if (!item.points || item.points.length < 3) continue;
 
           overlayCtx.save();
           overlayCtx.beginPath();
@@ -257,7 +400,7 @@
           overlayCtx.clip();
           overlayCtx.drawImage(pixelCanvas, 0, 0);
           overlayCtx.restore();
-        });
+        }
       }
 
       startCapture();

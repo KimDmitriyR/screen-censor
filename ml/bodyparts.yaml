@@ -1,0 +1,25 @@
+path: datasets/bodyparts
+train: images/train
+val: images/val
+
+names:
+  0: face
+  1: eyes
+  2: shoulders
+  3: torso
+  4: chest
+  5: back
+  6: armpits
+  7: navel
+  8: hips
+  9: hands
+  10: wrists
+  11: forearms
+  12: buttocks
+  13: thighs
+  14: knees
+  15: calves
+  16: feet
+  17: intimate_front
+  18: intimate_back
+  19: silhouette
