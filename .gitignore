@@ -1,7 +1,21 @@
-node_modules/
-app/node_modules/
-.env
-dist/
-build/
+# Python
 __pycache__/
 *.pyc
+venv/
+venv310/
+
+# Electron / Node
+app/node_modules/
+
+# Generated datasets and training artifacts
+datasets/public/
+datasets/bodyparts/images/
+datasets/bodyparts/labels/
+datasets/bodyparts/manual_review/
+datasets/bodyparts/review_pack*/
+datasets/bodyparts/metadata/
+ml/runs/
+
+# OS
+.DS_Store
+Thumbs.db
