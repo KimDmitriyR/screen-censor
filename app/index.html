@@ -1,133 +1,602 @@
 <!DOCTYPE html>
-<html>
-  <body style="margin:0; overflow:hidden; background: transparent;">
-    <div id="container" style="position:relative; width:100vw; height:100vh;">
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Screen Censor</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --panel-bg: rgba(10, 10, 12, 0.9);
+        --panel-border: rgba(255, 255, 255, 0.12);
+        --panel-muted: rgba(255, 255, 255, 0.68);
+        --panel-strong: rgba(255, 255, 255, 0.92);
+        --accent: #5ce0a0;
+        --accent-soft: rgba(92, 224, 160, 0.18);
+        --danger: #ff8f8f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+
+      #container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      #canvas,
+      #overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      #overlay.locked {
+        pointer-events: none;
+      }
+
+      #overlay.editing {
+        cursor: grab;
+        pointer-events: auto;
+      }
+
+      #overlay.editing.dragging {
+        cursor: grabbing;
+      }
+
+      #panel {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        width: 360px;
+        max-height: calc(100vh - 24px);
+        overflow: hidden;
+        background: var(--panel-bg);
+        color: white;
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        backdrop-filter: blur(14px);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+        z-index: 10;
+        transition: transform 140ms ease, opacity 140ms ease, width 140ms ease;
+        pointer-events: auto;
+      }
+
+      #panel.collapsed {
+        width: 58px;
+      }
+
+      #panelHeader {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      #panelTitle {
+        flex: 1;
+      }
+
+      #panelTitle strong {
+        display: block;
+        font-size: 15px;
+        color: var(--panel-strong);
+      }
+
+      #panelTitle span {
+        display: block;
+        font-size: 12px;
+        color: var(--panel-muted);
+        margin-top: 2px;
+      }
+
+      .iconButton,
+      .modeButton,
+      .ghostButton,
+      .chip {
+        appearance: none;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.06);
+        color: white;
+        border-radius: 12px;
+        padding: 9px 12px;
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+      }
+
+      .iconButton:hover,
+      .modeButton:hover,
+      .ghostButton:hover,
+      .chip:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.22);
+      }
+
+      .iconButton:active,
+      .modeButton:active,
+      .ghostButton:active,
+      .chip:active {
+        transform: translateY(1px);
+      }
+
+      .iconButton {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        font-size: 16px;
+      }
+
+      #panelBody {
+        padding: 12px;
+        max-height: calc(100vh - 96px);
+        overflow: auto;
+      }
+
+      #panel.collapsed #panelBody,
+      #panel.collapsed #panelTitle,
+      #panel.collapsed #modeButtons,
+      #panel.collapsed #summaryBlock,
+      #panel.collapsed #controls,
+      #panel.collapsed #selectionBlock,
+      #panel.collapsed #panelActions {
+        display: none;
+      }
+
+      #collapsedHandle {
+        display: none;
+      }
+
+      #panel.collapsed #collapsedHandle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+      }
+
+      #modeButtons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .modeButton.active {
+        background: var(--accent-soft);
+        border-color: rgba(92, 224, 160, 0.55);
+        color: #dfffee;
+      }
+
+      .modeButton small {
+        display: block;
+        color: var(--panel-muted);
+        margin-top: 4px;
+        font-size: 11px;
+      }
+
+      #summaryBlock,
+      #selectionBlock,
+      #panelActions {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        padding: 10px;
+        margin-bottom: 12px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      #summaryBlock h3,
+      #selectionBlock h3 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: var(--panel-strong);
+      }
+
+      #summaryBlock p,
+      #selectionBlock p {
+        margin: 0;
+        font-size: 12px;
+        color: var(--panel-muted);
+        line-height: 1.45;
+      }
+
+      #selectionMeta {
+        margin-top: 8px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .selectionRow {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 12px;
+      }
+
+      .selectionRow span:first-child {
+        color: var(--panel-muted);
+      }
+
+      .selectionRow span:last-child {
+        color: var(--panel-strong);
+        text-align: right;
+      }
+
+      .actionRow {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .ghostButton.warn {
+        border-color: rgba(255, 143, 143, 0.28);
+        color: #ffd3d3;
+      }
+
+      .group {
+        margin-bottom: 10px;
+      }
+
+      .groupTitle {
+        font-weight: 700;
+        color: var(--panel-strong);
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .controlRow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: var(--panel-strong);
+      }
+
+      .controlRow input {
+        margin: 0;
+      }
+
+      #editBadge {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(10, 10, 12, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: white;
+        z-index: 10;
+        font-size: 12px;
+        backdrop-filter: blur(10px);
+        pointer-events: none;
+      }
+
+      #editBadge strong {
+        display: block;
+        color: var(--panel-strong);
+        margin-bottom: 4px;
+      }
+
+      #editBadge.hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
       <video id="video" autoplay playsinline style="display:none;"></video>
-
-      <canvas id="canvas"
-        style="position:absolute; top:0; left:0; width:100%; height:100%;">
-      </canvas>
-
-      <canvas id="overlay"
-        style="position:absolute; top:0; left:0; width:100%; height:100%;">
-      </canvas>
+      <canvas id="canvas"></canvas>
+      <canvas id="overlay" class="locked"></canvas>
     </div>
 
-    <div id="panel"
-         style="position:fixed; top:10px; left:10px; width:320px; max-height:calc(100vh - 20px); overflow:auto; background:rgba(0,0,0,0.88); color:white; padding:12px; z-index:999; font-family:sans-serif; border-radius:12px; backdrop-filter: blur(8px); box-shadow:0 8px 24px rgba(0,0,0,0.35);">
-      <div style="font-weight:700; font-size:16px; margin-bottom:10px;">Панель цензуры</div>
-      <div id="controls"></div>
+    <div id="panel">
+      <div id="panelHeader">
+        <div id="panelTitle">
+          <strong>Censorship control</strong>
+          <span>Switch modes, tune visible zones, edit masks live.</span>
+        </div>
+        <div id="collapsedHandle">
+          <button id="expandPanel" class="iconButton" title="Expand panel">+</button>
+        </div>
+        <button id="collapsePanel" class="iconButton" title="Collapse panel">-</button>
+      </div>
+
+      <div id="panelBody">
+        <div id="modeButtons">
+          <button id="lockModeButton" class="modeButton active" type="button">
+            Lock censorship
+            <small>Click-through overlay, current behavior.</small>
+          </button>
+          <button id="editModeButton" class="modeButton" type="button">
+            Edit censorship
+            <small>Click, drag and scale zones live.</small>
+          </button>
+        </div>
+
+        <div id="summaryBlock">
+          <h3>Mode</h3>
+          <p id="modeSummary">Overlay is locked and stays on top without blocking the screen.</p>
+        </div>
+
+        <div id="selectionBlock">
+          <h3>Selected zone</h3>
+          <p id="selectionHint">Switch to Edit mode, then click a censorship zone to move or resize it.</p>
+          <div id="selectionMeta"></div>
+        </div>
+
+        <div id="panelActions">
+          <div class="actionRow">
+            <button id="resetSelectedButton" class="ghostButton" type="button">Reset selected</button>
+            <button id="resetAllButton" class="ghostButton warn" type="button">Reset all edits</button>
+          </div>
+        </div>
+
+        <div id="controls"></div>
+      </div>
     </div>
 
+    <div id="editBadge" class="hidden">
+      <strong>Edit mode</strong>
+      <span>Drag a zone. Use mouse wheel to scale. Double click to reset one zone.</span>
+    </div>
+
+    <script src="./overlay_state.js"></script>
     <script>
       const PARTS = [
-        { id: "face", label: "Лицо", checked: true, group: "Голова" },
-        { id: "eyes", label: "Глаза", checked: true, group: "Голова" },
-
-        { id: "shoulders", label: "Плечи", checked: false, group: "Верх тела" },
-        { id: "torso", label: "Туловище", checked: true, group: "Верх тела" },
-        { id: "chest", label: "Грудь", checked: false, group: "Верх тела" },
-        { id: "back", label: "Спина", checked: false, group: "Верх тела" },
-        { id: "armpits", label: "Подмышки", checked: false, group: "Верх тела" },
-        { id: "navel", label: "Пупок", checked: false, group: "Верх тела" },
-        { id: "hips", label: "Бёдра / таз", checked: false, group: "Верх тела" },
-
-        { id: "hands", label: "Кисти", checked: true, group: "Руки" },
-        { id: "wrists", label: "Запястья", checked: false, group: "Руки" },
-        { id: "forearms", label: "Предплечья", checked: false, group: "Руки" },
-
-        { id: "buttocks", label: "Ягодицы", checked: false, group: "Низ тела" },
-        { id: "thighs", label: "Бёдра", checked: false, group: "Низ тела" },
-        { id: "knees", label: "Колени", checked: false, group: "Низ тела" },
-        { id: "calves", label: "Икры", checked: false, group: "Низ тела" },
-        { id: "feet", label: "Ступни", checked: false, group: "Низ тела" },
-
-        { id: "intimate_front", label: "Чувствительная зона спереди", checked: false, group: "Чувствительные зоны" },
-        { id: "intimate_back", label: "Чувствительная зона сзади", checked: false, group: "Чувствительные зоны" },
-
-        { id: "silhouette", label: "Силуэт целиком", checked: true, group: "Продвинутое" }
+        { id: "face", label: "Face", checked: true, group: "Head" },
+        { id: "eyes", label: "Eyes", checked: true, group: "Head" },
+        { id: "shoulders", label: "Shoulders", checked: false, group: "Upper body" },
+        { id: "torso", label: "Torso", checked: true, group: "Upper body" },
+        { id: "chest", label: "Chest", checked: false, group: "Upper body" },
+        { id: "back", label: "Back", checked: false, group: "Upper body" },
+        { id: "armpits", label: "Armpits", checked: false, group: "Upper body" },
+        { id: "navel", label: "Navel", checked: false, group: "Upper body" },
+        { id: "hips", label: "Hips", checked: false, group: "Upper body" },
+        { id: "hands", label: "Hands", checked: true, group: "Arms" },
+        { id: "wrists", label: "Wrists", checked: false, group: "Arms" },
+        { id: "forearms", label: "Forearms", checked: false, group: "Arms" },
+        { id: "buttocks", label: "Buttocks", checked: false, group: "Lower body" },
+        { id: "thighs", label: "Thighs", checked: false, group: "Lower body" },
+        { id: "knees", label: "Knees", checked: false, group: "Lower body" },
+        { id: "calves", label: "Calves", checked: false, group: "Lower body" },
+        { id: "feet", label: "Feet", checked: false, group: "Lower body" },
+        { id: "male_groin", label: "Male groin", checked: false, group: "Sensitive" },
+        { id: "intimate_front", label: "Intimate front", checked: false, group: "Sensitive" },
+        { id: "intimate_back", label: "Intimate back", checked: false, group: "Sensitive" },
+        { id: "silhouette", label: "Silhouette", checked: true, group: "Advanced" }
       ];
 
       const PART_BEHAVIOR = {
-        face: { smooth: 0.65, predict: 0.00 },
-        eyes: { smooth: 0.75, predict: 0.00 },
-        shoulders: { smooth: 0.45, predict: 0.03 },
-        torso: { smooth: 0.40, predict: 0.08 },
-        chest: { smooth: 0.38, predict: 0.06 },
-        back: { smooth: 0.38, predict: 0.06 },
-        armpits: { smooth: 0.40, predict: 0.05 },
-        navel: { smooth: 0.42, predict: 0.04 },
-        hips: { smooth: 0.42, predict: 0.04 },
-        buttocks: { smooth: 0.42, predict: 0.04 },
-        hands: { smooth: 0.48, predict: 0.12 },
-        wrists: { smooth: 0.55, predict: 0.00 },
-        forearms: { smooth: 0.45, predict: 0.10 },
-        thighs: { smooth: 0.48, predict: 0.10 },
-        knees: { smooth: 0.55, predict: 0.02 },
-        calves: { smooth: 0.45, predict: 0.08 },
-        feet: { smooth: 0.55, predict: 0.02 },
-        intimate_front: { smooth: 0.45, predict: 0.00 },
-        intimate_back: { smooth: 0.45, predict: 0.00 },
-        silhouette: { smooth: 0.35, predict: 0.05 }
+        face: { smooth: 0.72, predict: 0.0, holdMs: 260, fadeInMs: 80, fadeOutMs: 150, stableAcceptScore: 0.44, candidateAcceptScore: 0.56 },
+        eyes: { smooth: 0.84, predict: 0.0, holdMs: 260, fadeInMs: 80, fadeOutMs: 150, matchPx: 140, confirmFrames: 2, strongConfirmFrames: 3, candidateBlend: 0.44, promoteBlend: 0.22, stableAcceptScore: 0.28, candidateAcceptScore: 0.44, maxAreaRatio: 2.1 },
+        shoulders: { smooth: 0.52, predict: 0.02, holdMs: 210, fadeInMs: 90, fadeOutMs: 135, stableAcceptScore: 0.48 },
+        torso: { smooth: 0.42, predict: 0.07, holdMs: 380, fadeInMs: 110, fadeOutMs: 240, stableAcceptScore: 0.44, candidateAcceptScore: 0.54 },
+        chest: { smooth: 0.36, predict: 0.05, holdMs: 280, fadeInMs: 100, fadeOutMs: 180 },
+        back: { smooth: 0.36, predict: 0.05, holdMs: 300, fadeInMs: 100, fadeOutMs: 180 },
+        armpits: { smooth: 0.48, predict: 0.02, holdMs: 220, fadeInMs: 90, fadeOutMs: 140, stableAcceptScore: 0.42, candidateAcceptScore: 0.52 },
+        navel: { smooth: 0.44, predict: 0.02, holdMs: 220, fadeInMs: 90, fadeOutMs: 150 },
+        hips: { smooth: 0.44, predict: 0.04, holdMs: 240, fadeInMs: 100, fadeOutMs: 170 },
+        buttocks: { smooth: 0.44, predict: 0.03, holdMs: 320, fadeInMs: 100, fadeOutMs: 200 },
+        hands: { smooth: 0.54, predict: 0.08, holdMs: 240, fadeInMs: 90, fadeOutMs: 150, stableAcceptScore: 0.46, candidateAcceptScore: 0.56 },
+        wrists: { smooth: 0.58, predict: 0.0, holdMs: 180, fadeInMs: 80, fadeOutMs: 130 },
+        forearms: { smooth: 0.47, predict: 0.08, holdMs: 210, fadeInMs: 90, fadeOutMs: 150 },
+        thighs: { smooth: 0.5, predict: 0.08, holdMs: 240, fadeInMs: 100, fadeOutMs: 170 },
+        knees: { smooth: 0.58, predict: 0.02, holdMs: 200, fadeInMs: 90, fadeOutMs: 140 },
+        calves: { smooth: 0.48, predict: 0.06, holdMs: 230, fadeInMs: 100, fadeOutMs: 160 },
+        feet: { smooth: 0.62, predict: 0.02, holdMs: 320, fadeInMs: 100, fadeOutMs: 170, confirmFrames: 2, strongConfirmFrames: 3, stableAcceptScore: 0.42, candidateAcceptScore: 0.54 },
+        male_groin: { smooth: 0.46, predict: 0.0, holdMs: 360, fadeInMs: 100, fadeOutMs: 240, stableAcceptScore: 0.42, candidateAcceptScore: 0.52 },
+        intimate_front: { smooth: 0.46, predict: 0.0, holdMs: 360, fadeInMs: 100, fadeOutMs: 240, stableAcceptScore: 0.42, candidateAcceptScore: 0.52 },
+        intimate_back: { smooth: 0.44, predict: 0.0, holdMs: 320, fadeInMs: 100, fadeOutMs: 220 },
+        silhouette: { smooth: 0.38, predict: 0.03, holdMs: 420, fadeInMs: 120, fadeOutMs: 300, confirmFrames: 2, stableAcceptScore: 0.46, candidateAcceptScore: 0.56 }
       };
 
+      const OVERRIDE_STORAGE_KEY = "screen-censor.user-zone-overrides.v1";
       const video = document.getElementById("video");
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
-
       const overlay = document.getElementById("overlay");
       const overlayCtx = overlay.getContext("2d");
-
+      const panel = document.getElementById("panel");
+      const controls = document.getElementById("controls");
       const smallCanvas = document.createElement("canvas");
       const smallCtx = smallCanvas.getContext("2d");
-
       const pixelCanvas = document.createElement("canvas");
       const pixelCtx = pixelCanvas.getContext("2d");
+      const overlayState = ScreenCensorOverlayState.createStableOverlayState({ partBehavior: PART_BEHAVIOR });
 
-      let latestPolygons = [];
-      let trackedPolygons = new Map();
-      let isInferenceRunning = false;
-      let frameCounter = 0;
+      let latestInferencePolygons = [];
+      let latestRenderedPolygons = [];
+      let latestBasePolygons = [];
       let lastInferenceAt = 0;
+      let isInferenceRunning = false;
+      let uiMode = "lock";
+      let panelCollapsed = false;
+      let panelHot = false;
+      let selectedStableId = null;
+      let dragState = null;
+      let userZoneOverrides = loadOverrides();
+      let captureState = {
+        sourceCount: 0,
+        streamStarted: false,
+        metadataReady: false,
+        detectAttempts: 0,
+        detectSuccesses: 0,
+        lastError: null
+      };
 
-      const INFER_EVERY_N_FRAMES = 4;
       const INFER_TARGET_MS = 90;
-      const STALE_MS = 450;
-      const DEFAULT_HOLD_FRAMES = 6;
+      const HARD_STALE_MS = 1800;
+      const JPEG_QUALITY = 0.85;
+
+      function loadOverrides() {
+        try {
+          const raw = localStorage.getItem(OVERRIDE_STORAGE_KEY);
+          const parsed = raw ? JSON.parse(raw) : {};
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch (_error) {
+          return {};
+        }
+      }
+
+      function saveOverrides() {
+        localStorage.setItem(OVERRIDE_STORAGE_KEY, JSON.stringify(userZoneOverrides));
+      }
+
+      function getOverrideKey(item) {
+        return String(item.stableId || item.id || item.part);
+      }
+
+      function getUserOverride(item) {
+        return userZoneOverrides[getOverrideKey(item)] || null;
+      }
+
+      function clonePoints(points) {
+        return (points || []).map((point) => ({ x: Number(point.x) || 0, y: Number(point.y) || 0 }));
+      }
+
+      function centroid(points) {
+        let sx = 0;
+        let sy = 0;
+        for (const point of points || []) {
+          sx += Number(point.x) || 0;
+          sy += Number(point.y) || 0;
+        }
+        const count = Math.max(1, (points || []).length);
+        return { x: sx / count, y: sy / count };
+      }
+
+      function bounds(points) {
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const point of points || []) {
+          const x = Number(point.x) || 0;
+          const y = Number(point.y) || 0;
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+        if (!Number.isFinite(minX)) {
+          return { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 };
+        }
+        return {
+          minX,
+          minY,
+          maxX,
+          maxY,
+          width: Math.max(0, maxX - minX),
+          height: Math.max(0, maxY - minY)
+        };
+      }
+
+      function clampScale(scale) {
+        return Math.max(0.5, Math.min(1.9, Number(scale) || 1));
+      }
+
+      function applyOverride(points, override) {
+        if (!override) return clonePoints(points);
+        const center = centroid(points);
+        const dx = Number(override.dx) || 0;
+        const dy = Number(override.dy) || 0;
+        const scale = clampScale(override.scale);
+        return clonePoints(points).map((point) => ({
+          x: center.x + (point.x - center.x) * scale + dx,
+          y: center.y + (point.y - center.y) * scale + dy
+        }));
+      }
+
+      function applyUserOverrides(polygons) {
+        return (polygons || []).map((item) => {
+          const override = getUserOverride(item);
+          return {
+            ...item,
+            points: applyOverride(item.points, override)
+          };
+        });
+      }
+
+      function cleanupOverrides(maxAgeMs = 6 * 60 * 60 * 1000) {
+        const now = Date.now();
+        let changed = false;
+        for (const [key, value] of Object.entries(userZoneOverrides)) {
+          if (!value || now - (value.updatedAt || now) > maxAgeMs) {
+            delete userZoneOverrides[key];
+            changed = true;
+          }
+        }
+        if (changed) saveOverrides();
+      }
+
+      function updateUserOverride(key, patch) {
+        const current = userZoneOverrides[key] || { dx: 0, dy: 0, scale: 1 };
+        userZoneOverrides[key] = {
+          ...current,
+          ...patch,
+          scale: clampScale(patch.scale == null ? current.scale : patch.scale),
+          updatedAt: Date.now()
+        };
+        saveOverrides();
+      }
+
+      function removeUserOverride(key) {
+        if (!userZoneOverrides[key]) return;
+        delete userZoneOverrides[key];
+        saveOverrides();
+      }
+
+      function currentSettings() {
+        const out = {};
+        for (const part of PARTS) {
+          out[part.id] = document.getElementById(part.id).checked;
+        }
+        return out;
+      }
+
+      function anyEnabled(settings) {
+        return Object.values(settings).some(Boolean);
+      }
 
       function renderControls() {
         const groups = {};
-        for (const p of PARTS) {
-          if (!groups[p.group]) groups[p.group] = [];
-          groups[p.group].push(p);
+        for (const part of PARTS) {
+          if (!groups[part.group]) groups[part.group] = [];
+          groups[part.group].push(part);
         }
 
-        const controls = document.getElementById("controls");
         controls.innerHTML = "";
-
-        for (const [group, items] of Object.entries(groups)) {
+        for (const [groupName, items] of Object.entries(groups)) {
           const wrap = document.createElement("div");
-          wrap.style.marginBottom = "10px";
+          wrap.className = "group";
 
           const title = document.createElement("div");
-          title.textContent = group;
-          title.style.fontWeight = "700";
-          title.style.margin = "8px 0 6px";
+          title.className = "groupTitle";
+          title.textContent = groupName;
           wrap.appendChild(title);
 
           for (const item of items) {
             const row = document.createElement("label");
-            row.style.display = "block";
-            row.style.margin = "4px 0";
-            row.style.cursor = "pointer";
-
-            const cb = document.createElement("input");
-            cb.type = "checkbox";
-            cb.id = item.id;
-            cb.checked = item.checked;
-            cb.style.marginRight = "8px";
-
-            row.appendChild(cb);
+            row.className = "controlRow";
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.id = item.id;
+            checkbox.checked = item.checked;
+            row.appendChild(checkbox);
             row.appendChild(document.createTextNode(item.label));
             wrap.appendChild(row);
           }
@@ -136,73 +605,272 @@
         }
       }
 
-      renderControls();
-
-      function currentSettings() {
-        const s = {};
-        for (const p of PARTS) {
-          s[p.id] = document.getElementById(p.id).checked;
-        }
-        return s;
+      function updateModeUi() {
+        const editMode = uiMode === "edit";
+        document.getElementById("lockModeButton").classList.toggle("active", !editMode);
+        document.getElementById("editModeButton").classList.toggle("active", editMode);
+        overlay.classList.toggle("locked", !editMode);
+        overlay.classList.toggle("editing", editMode);
+        document.getElementById("editBadge").classList.toggle("hidden", !editMode);
+        document.getElementById("modeSummary").textContent = editMode
+          ? "Edit mode is active. Overlay and panel accept clicks, zones can move and scale live."
+          : "Overlay is locked, stays on top, and only the left panel becomes clickable when you hover it.";
+        notifyInteractionState();
       }
 
-      function anyEnabled(settings) {
-        return Object.values(settings).some(Boolean);
+      function updatePanelUi() {
+        panel.classList.toggle("collapsed", panelCollapsed);
+        notifyInteractionState();
       }
 
-      function behaviorFor(part) {
-        return PART_BEHAVIOR[part] || { smooth: 0.4, predict: 0.05 };
-      }
-
-      async function startCapture() {
-        const sources = await window.electronAPI.getSources();
-        const source = sources[0];
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            mandatory: {
-              chromeMediaSource: "desktop",
-              chromeMediaSourceId: source.id,
-              maxWidth: 1920,
-              maxHeight: 1080
-            }
-          }
+      function notifyInteractionState() {
+        if (!window.electronAPI || typeof window.electronAPI.updateInteractionState !== "function") return;
+        window.electronAPI.updateInteractionState({
+          editMode: uiMode === "edit",
+          panelHot
         });
+      }
 
-        video.srcObject = stream;
+      function setUiMode(nextMode) {
+        uiMode = nextMode === "edit" ? "edit" : "lock";
+        if (uiMode !== "edit") {
+          dragState = null;
+          overlay.classList.remove("dragging");
+        }
+        updateModeUi();
+        updateSelectionUi();
+      }
 
-        video.onloadedmetadata = () => {
-          const width = video.videoWidth;
-          const height = video.videoHeight;
+      function togglePanelCollapsed(nextState) {
+        panelCollapsed = typeof nextState === "boolean" ? nextState : !panelCollapsed;
+        updatePanelUi();
+      }
 
-          canvas.width = width;
-          canvas.height = height;
-          overlay.width = width;
-          overlay.height = height;
+      function setPanelHot(next) {
+        panelHot = Boolean(next);
+        notifyInteractionState();
+      }
 
-          canvas.style.width = "100vw";
-          canvas.style.height = "100vh";
-          overlay.style.width = "100vw";
-          overlay.style.height = "100vh";
+      function buildPixelatedFrame() {
+        const scale = 0.08;
+        const smallW = Math.max(1, Math.floor(canvas.width * scale));
+        const smallH = Math.max(1, Math.floor(canvas.height * scale));
+        smallCanvas.width = smallW;
+        smallCanvas.height = smallH;
+        pixelCanvas.width = canvas.width;
+        pixelCanvas.height = canvas.height;
+        smallCtx.drawImage(canvas, 0, 0, smallW, smallH);
+        pixelCtx.imageSmoothingEnabled = false;
+        pixelCtx.clearRect(0, 0, pixelCanvas.width, pixelCanvas.height);
+        pixelCtx.drawImage(smallCanvas, 0, 0, smallW, smallH, 0, 0, pixelCanvas.width, pixelCanvas.height);
+      }
 
-          requestAnimationFrame(renderLoop);
-          scheduleInference();
+      function drawEditorChrome(item) {
+        const box = bounds(item.points);
+        overlayCtx.save();
+        overlayCtx.lineWidth = selectedStableId === item.stableId ? 2.5 : 1.25;
+        overlayCtx.strokeStyle = selectedStableId === item.stableId ? "rgba(92,224,160,0.95)" : "rgba(255,255,255,0.45)";
+        overlayCtx.setLineDash(selectedStableId === item.stableId ? [] : [8, 6]);
+        overlayCtx.strokeRect(box.minX, box.minY, box.width, box.height);
+        overlayCtx.setLineDash([]);
+        overlayCtx.fillStyle = selectedStableId === item.stableId ? "rgba(92,224,160,0.95)" : "rgba(255,255,255,0.65)";
+        overlayCtx.beginPath();
+        overlayCtx.arc(box.maxX, box.minY, 5, 0, Math.PI * 2);
+        overlayCtx.fill();
+        overlayCtx.restore();
+      }
+
+      function drawCensor(polygons) {
+        const enabled = currentSettings();
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        if (!polygons || polygons.length === 0) return;
+
+        buildPixelatedFrame();
+
+        for (const item of polygons) {
+          if (!enabled[item.part]) continue;
+          if (!item.points || item.points.length < 3) continue;
+          if ((item.alpha ?? 1) <= 0.02) continue;
+
+          overlayCtx.save();
+          overlayCtx.globalAlpha = Math.max(0, Math.min(1, item.alpha ?? 1));
+          overlayCtx.beginPath();
+          overlayCtx.moveTo(item.points[0].x, item.points[0].y);
+          for (let i = 1; i < item.points.length; i++) {
+            overlayCtx.lineTo(item.points[i].x, item.points[i].y);
+          }
+          overlayCtx.closePath();
+          overlayCtx.clip();
+          overlayCtx.drawImage(pixelCanvas, 0, 0);
+          overlayCtx.restore();
+        }
+
+        if (uiMode === "edit") {
+          for (const item of polygons) {
+            if (!enabled[item.part]) continue;
+            if (!item.points || item.points.length < 3) continue;
+            drawEditorChrome(item);
+          }
+        }
+      }
+
+      function pointInPolygon(point, polygon) {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const xi = polygon[i].x;
+          const yi = polygon[i].y;
+          const xj = polygon[j].x;
+          const yj = polygon[j].y;
+          const intersects = ((yi > point.y) !== (yj > point.y)) &&
+            (point.x < ((xj - xi) * (point.y - yi)) / Math.max(0.0001, (yj - yi)) + xi);
+          if (intersects) inside = !inside;
+        }
+        return inside;
+      }
+
+      function getPointerPosition(event) {
+        const rect = overlay.getBoundingClientRect();
+        const scaleX = overlay.width / Math.max(1, rect.width);
+        const scaleY = overlay.height / Math.max(1, rect.height);
+        return {
+          x: (event.clientX - rect.left) * scaleX,
+          y: (event.clientY - rect.top) * scaleY
         };
       }
 
-      function renderLoop() {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      function polygonByStableId(stableId) {
+        return latestRenderedPolygons.find((item) => item.stableId === stableId) || null;
+      }
 
-        const elapsed = performance.now() - lastInferenceAt;
-        if (lastInferenceAt === 0 || elapsed <= STALE_MS) {
-          const stablePolygons = getPredictedPolygons();
-          drawCensor(stablePolygons);
-        } else {
-          overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-          trackedPolygons.clear();
+      function selectPolygon(item) {
+        selectedStableId = item ? item.stableId : null;
+        updateSelectionUi();
+      }
+
+      function updateSelectionUi() {
+        const selected = selectedStableId ? polygonByStableId(selectedStableId) : null;
+        const hint = document.getElementById("selectionHint");
+        const meta = document.getElementById("selectionMeta");
+        meta.innerHTML = "";
+
+        if (!selected) {
+          hint.textContent = uiMode === "edit"
+            ? "Click a visible zone to move it or resize it with the mouse wheel."
+            : "Switch to Edit mode, then click a censorship zone to move or resize it.";
+          return;
         }
 
+        const override = getUserOverride(selected) || { dx: 0, dy: 0, scale: 1 };
+        hint.textContent = "Changes are applied immediately and stored locally for this tracked zone.";
+
+        const rows = [
+          ["Part", selected.part],
+          ["Track", selected.stableId],
+          ["Offset", `${Math.round(override.dx || 0)} x ${Math.round(override.dy || 0)}`],
+          ["Scale", `${(clampScale(override.scale) * 100).toFixed(0)}%`]
+        ];
+
+        for (const [label, value] of rows) {
+          const row = document.createElement("div");
+          row.className = "selectionRow";
+          const left = document.createElement("span");
+          left.textContent = label;
+          const right = document.createElement("span");
+          right.textContent = value;
+          row.appendChild(left);
+          row.appendChild(right);
+          meta.appendChild(row);
+        }
+      }
+
+      function resetSelectedOverride() {
+        if (!selectedStableId) return;
+        removeUserOverride(selectedStableId);
+        updateSelectionUi();
+      }
+
+      function resetAllOverrides() {
+        userZoneOverrides = {};
+        saveOverrides();
+        updateSelectionUi();
+      }
+
+      function pointerSelectAt(point) {
+        const candidates = [...latestRenderedPolygons].reverse();
+        for (const polygon of candidates) {
+          if (!currentSettings()[polygon.part]) continue;
+          if (pointInPolygon(point, polygon.points)) {
+            selectPolygon(polygon);
+            return polygon;
+          }
+        }
+        selectPolygon(null);
+        return null;
+      }
+
+      function onOverlayPointerDown(event) {
+        if (uiMode !== "edit") return;
+        const point = getPointerPosition(event);
+        const polygon = pointerSelectAt(point);
+        if (!polygon) return;
+
+        const key = getOverrideKey(polygon);
+        const override = getUserOverride(polygon) || { dx: 0, dy: 0, scale: 1 };
+        dragState = {
+          key,
+          startPoint: point,
+          startDx: Number(override.dx) || 0,
+          startDy: Number(override.dy) || 0
+        };
+        overlay.classList.add("dragging");
+        event.preventDefault();
+      }
+
+      function onOverlayPointerMove(event) {
+        if (uiMode !== "edit" || !dragState) return;
+        const point = getPointerPosition(event);
+        updateUserOverride(dragState.key, {
+          dx: dragState.startDx + point.x - dragState.startPoint.x,
+          dy: dragState.startDy + point.y - dragState.startPoint.y
+        });
+        updateSelectionUi();
+      }
+
+      function finishDrag() {
+        dragState = null;
+        overlay.classList.remove("dragging");
+      }
+
+      function onOverlayWheel(event) {
+        if (uiMode !== "edit") return;
+        const point = getPointerPosition(event);
+        const polygon = pointerSelectAt(point);
+        if (!polygon) return;
+        const key = getOverrideKey(polygon);
+        const current = getUserOverride(polygon) || { dx: 0, dy: 0, scale: 1 };
+        const factor = event.deltaY < 0 ? 1.06 : 0.94;
+        updateUserOverride(key, { scale: clampScale((current.scale || 1) * factor) });
+        updateSelectionUi();
+        event.preventDefault();
+      }
+
+      function onOverlayDoubleClick(event) {
+        if (uiMode !== "edit") return;
+        const point = getPointerPosition(event);
+        const polygon = pointerSelectAt(point);
+        if (!polygon) return;
+        removeUserOverride(getOverrideKey(polygon));
+        updateSelectionUi();
+      }
+
+      function renderLoop(now) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const settings = currentSettings();
+        const inferenceAge = lastInferenceAt === 0 ? 0 : now - lastInferenceAt;
+        const forceFadeAll = lastInferenceAt > 0 && inferenceAge > HARD_STALE_MS;
+        latestBasePolygons = overlayState.advance(now, settings, { forceFadeAll });
+        latestRenderedPolygons = applyUserOverrides(latestBasePolygons);
+        drawCensor(latestRenderedPolygons);
         requestAnimationFrame(renderLoop);
       }
 
@@ -210,8 +878,10 @@
         const settings = currentSettings();
 
         if (!anyEnabled(settings)) {
-          latestPolygons = [];
-          trackedPolygons.clear();
+          latestInferencePolygons = [];
+          latestRenderedPolygons = [];
+          latestBasePolygons = [];
+          overlayState.clear(true);
           overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
           setTimeout(scheduleInference, 250);
           return;
@@ -224,11 +894,11 @@
 
         isInferenceRunning = true;
         const started = performance.now();
+        captureState.detectAttempts += 1;
 
         try {
-          const blob = await new Promise(resolve =>
-            canvas.toBlob(resolve, "image/jpeg", 0.85)
-          );
+          const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY));
+          if (!blob) throw new Error("Could not capture frame blob");
 
           const formData = new FormData();
           formData.append("frame", blob);
@@ -240,11 +910,14 @@
           });
 
           const result = await response.json();
-          latestPolygons = result.polygons || [];
+          latestInferencePolygons = result.polygons || [];
           lastInferenceAt = performance.now();
-          updateTracks(latestPolygons);
-        } catch (err) {
-          console.error(err);
+          captureState.detectSuccesses += 1;
+          overlayState.ingest(latestInferencePolygons, lastInferenceAt, settings);
+          cleanupOverrides();
+        } catch (error) {
+          captureState.lastError = error && error.message ? error.message : String(error);
+          console.error(error);
         } finally {
           isInferenceRunning = false;
           const elapsed = performance.now() - started;
@@ -253,156 +926,142 @@
         }
       }
 
-      function smoothPolygon(prevPoints, nextPoints, alpha) {
-        if (!prevPoints || !nextPoints || prevPoints.length !== nextPoints.length) {
-          return nextPoints;
-        }
-
-        const out = [];
-        for (let i = 0; i < nextPoints.length; i++) {
-          out.push({
-            x: prevPoints[i].x * (1 - alpha) + nextPoints[i].x * alpha,
-            y: prevPoints[i].y * (1 - alpha) + nextPoints[i].y * alpha
-          });
-        }
-        return out;
-      }
-
-      function predictPolygon(points, velocity, ahead) {
-        if (!points || !velocity || points.length !== velocity.length || ahead <= 0) {
-          return points;
-        }
-
-        return points.map((p, i) => ({
-          x: p.x + velocity[i].x * ahead,
-          y: p.y + velocity[i].y * ahead
-        }));
-      }
-
-      function updateTracks(rawPolygons) {
-        const seen = new Set();
-
-        for (const poly of rawPolygons) {
-          seen.add(poly.id);
-
-          const prev = trackedPolygons.get(poly.id);
-          const behavior = behaviorFor(poly.part);
-
-          if (!prev) {
-            trackedPolygons.set(poly.id, {
-              id: poly.id,
-              part: poly.part,
-              points: poly.points,
-              velocity: poly.points.map(() => ({ x: 0, y: 0 })),
-              missing: 0
-            });
-            continue;
+      async function startCapture() {
+        try {
+          const sources = await window.electronAPI.getSources();
+          captureState.sourceCount = Array.isArray(sources) ? sources.length : 0;
+          const source = sources[0];
+          if (!source) {
+            throw new Error("No desktop capture source was returned by Electron");
           }
 
-          const smoothed = smoothPolygon(prev.points, poly.points, behavior.smooth);
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              mandatory: {
+                chromeMediaSource: "desktop",
+                chromeMediaSourceId: source.id,
+                maxWidth: 1920,
+                maxHeight: 1080
+              }
+            }
+          });
 
-          const velocity = [];
-          if (prev.points && smoothed && prev.points.length === smoothed.length) {
-            for (let i = 0; i < smoothed.length; i++) {
-              const vx = (smoothed[i].x - prev.points[i].x);
-              const vy = (smoothed[i].y - prev.points[i].y);
+          captureState.streamStarted = true;
+          video.srcObject = stream;
+          video.onloadedmetadata = () => {
+            captureState.metadataReady = true;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            overlay.width = video.videoWidth;
+            overlay.height = video.videoHeight;
+            requestAnimationFrame(renderLoop);
+            scheduleInference();
+          };
+        } catch (error) {
+          captureState.lastError = error && error.message ? error.message : String(error);
+          console.error(error);
+        }
+      }
 
-              const oldV = prev.velocity?.[i] || { x: 0, y: 0 };
-
-              velocity.push({
-                x: oldV.x * 0.72 + vx * 0.28,
-                y: oldV.y * 0.72 + vy * 0.28
+      function waitForCaptureOrZone(timeoutMs = 12000) {
+        return new Promise((resolve, reject) => {
+          const started = performance.now();
+          const tick = () => {
+            if (latestRenderedPolygons.length > 0 || captureState.metadataReady || captureState.lastError) {
+              resolve({
+                polygon: latestRenderedPolygons[0] || null,
+                captureState: { ...captureState }
               });
+              return;
             }
-          } else {
-            for (let i = 0; i < smoothed.length; i++) {
-              velocity.push({ x: 0, y: 0 });
+            if (performance.now() - started > timeoutMs) {
+              reject(new Error("Timed out waiting for capture metadata or rendered zones"));
+              return;
             }
-          }
-
-          trackedPolygons.set(poly.id, {
-            id: poly.id,
-            part: poly.part,
-            points: smoothed,
-            velocity,
-            missing: 0
-          });
-        }
-
-        for (const [id, value] of trackedPolygons.entries()) {
-          if (!seen.has(id)) {
-            value.missing = (value.missing || 0) + 1;
-            if (value.missing > DEFAULT_HOLD_FRAMES) {
-              trackedPolygons.delete(id);
-            } else {
-              trackedPolygons.set(id, value);
-            }
-          }
-        }
+            setTimeout(tick, 120);
+          };
+          tick();
+        });
       }
 
-      function getPredictedPolygons() {
-        const out = [];
+      async function runUISmoke() {
+        const result = {
+          started_at: new Date().toISOString(),
+          initial_mode: uiMode,
+          steps: []
+        };
 
-        for (const item of trackedPolygons.values()) {
-          const behavior = behaviorFor(item.part);
-          const predicted = predictPolygon(item.points, item.velocity, behavior.predict);
-          out.push({
-            ...item,
-            points: predicted
-          });
+        const smokeInput = await waitForCaptureOrZone();
+
+        document.getElementById("collapsePanel").click();
+        result.steps.push({ action: "collapse_panel", collapsed: panelCollapsed });
+
+        document.getElementById("expandPanel").click();
+        result.steps.push({ action: "expand_panel", collapsed: panelCollapsed });
+
+        document.getElementById("editModeButton").click();
+        result.steps.push({ action: "edit_mode", uiMode });
+
+        const polygon = smokeInput.polygon || {
+          stableId: "smoke_zone",
+          id: "smoke_zone",
+          part: "face",
+          alpha: 1,
+          points: [
+            { x: 120, y: 120 },
+            { x: 240, y: 120 },
+            { x: 240, y: 240 },
+            { x: 120, y: 240 }
+          ]
+        };
+        if (!smokeInput.polygon) {
+          latestRenderedPolygons = [polygon];
         }
+        selectPolygon(polygon);
+        updateUserOverride(getOverrideKey(polygon), { dx: 18, dy: 10, scale: 1.08 });
+        updateSelectionUi();
+        result.steps.push({
+          action: "adjust_zone",
+          selectedStableId,
+          override: userZoneOverrides[getOverrideKey(polygon)]
+        });
 
-        return out;
+        document.getElementById("lockModeButton").click();
+        result.steps.push({ action: "lock_mode", uiMode });
+
+        result.window_clickable_panel = true;
+        result.edit_mode_enabled = true;
+        result.lock_mode_enabled = true;
+        result.overlay_zone_count = latestRenderedPolygons.length;
+        result.capture_state = { ...captureState };
+        result.used_synthetic_zone = !smokeInput.polygon;
+        result.final_mode = uiMode;
+        return result;
       }
 
-      function buildPixelatedFrame() {
-        const scale = 0.08;
-        const smallW = Math.max(1, Math.floor(canvas.width * scale));
-        const smallH = Math.max(1, Math.floor(canvas.height * scale));
+      renderControls();
+      updateModeUi();
+      updatePanelUi();
+      updateSelectionUi();
 
-        smallCanvas.width = smallW;
-        smallCanvas.height = smallH;
+      panel.addEventListener("mouseenter", () => setPanelHot(true));
+      panel.addEventListener("mouseleave", () => setPanelHot(false));
+      overlay.addEventListener("mousedown", onOverlayPointerDown);
+      overlay.addEventListener("mousemove", onOverlayPointerMove);
+      overlay.addEventListener("mouseup", finishDrag);
+      overlay.addEventListener("mouseleave", finishDrag);
+      overlay.addEventListener("wheel", onOverlayWheel, { passive: false });
+      overlay.addEventListener("dblclick", onOverlayDoubleClick);
 
-        pixelCanvas.width = canvas.width;
-        pixelCanvas.height = canvas.height;
+      document.getElementById("lockModeButton").addEventListener("click", () => setUiMode("lock"));
+      document.getElementById("editModeButton").addEventListener("click", () => setUiMode("edit"));
+      document.getElementById("collapsePanel").addEventListener("click", () => togglePanelCollapsed(true));
+      document.getElementById("expandPanel").addEventListener("click", () => togglePanelCollapsed(false));
+      document.getElementById("resetSelectedButton").addEventListener("click", resetSelectedOverride);
+      document.getElementById("resetAllButton").addEventListener("click", resetAllOverrides);
 
-        smallCtx.drawImage(canvas, 0, 0, smallW, smallH);
-
-        pixelCtx.imageSmoothingEnabled = false;
-        pixelCtx.clearRect(0, 0, pixelCanvas.width, pixelCanvas.height);
-        pixelCtx.drawImage(
-          smallCanvas,
-          0, 0, smallW, smallH,
-          0, 0, pixelCanvas.width, pixelCanvas.height
-        );
-      }
-
-      function drawCensor(polygons) {
-        const enabled = currentSettings();
-        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-
-        if (!polygons || polygons.length === 0) return;
-
-        buildPixelatedFrame();
-
-        for (const item of polygons) {
-          if (!enabled[item.part]) continue;
-          if (!item.points || item.points.length < 3) continue;
-
-          overlayCtx.save();
-          overlayCtx.beginPath();
-          overlayCtx.moveTo(item.points[0].x, item.points[0].y);
-          for (let i = 1; i < item.points.length; i++) {
-            overlayCtx.lineTo(item.points[i].x, item.points[i].y);
-          }
-          overlayCtx.closePath();
-          overlayCtx.clip();
-          overlayCtx.drawImage(pixelCanvas, 0, 0);
-          overlayCtx.restore();
-        }
-      }
-
+      window.runUISmoke = runUISmoke;
       startCapture();
     </script>
   </body>
